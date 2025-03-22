@@ -7,6 +7,7 @@ import json
 import re
 import sys
 import asyncio
+import os
 # ---local imports---
 from scraper import scrape_urls
 from pagination import paginate_urls
@@ -27,36 +28,64 @@ if supabase==None:
     st.error("🚨 **Supabase is not configured!** This project requires a Supabase database to function.")
     st.warning("Follow these steps to set it up:")
 
-    st.markdown("""
-    1. **[Create a free Supabase account](https://supabase.com/)**.
-    2. **Create a new project** inside Supabase.
-    3. **Create a table** in your project by running the following SQL command in the **SQL Editor**:
+    # Check if we're in a hosted environment or local environment
+    is_hosted = os.environ.get("HOSTED_ENVIRONMENT") or "STREAMLIT_SHARING" in os.environ or "DYNO" in os.environ or "VERCEL" in os.environ
     
-    ```sql
-    CREATE TABLE IF NOT EXISTS scraped_data (
-    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    unique_name TEXT NOT NULL,
-    url TEXT,
-    raw_data JSONB,        
-    formatted_data JSONB, 
-    pagination_data JSONB,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-    ```
+    if is_hosted:
+        st.warning("⚠️ It appears you're running in a hosted environment but the Supabase credentials are missing. You need to set environment variables.")
+        st.markdown("""
+        ### Hosting Environment Setup:
+        
+        For hosted environments (Streamlit Cloud, Heroku, Vercel, etc.), you need to set environment variables:
+        
+        1. **Find Your Supabase Credentials**:
+           - From Supabase dashboard → Project Settings → API
+           - Copy your **URL** and **anon key**
+           
+        2. **Set Environment Variables on Your Hosting Platform**:
+           - For Streamlit Cloud: Add to Secrets section
+           - For Heroku: Use `heroku config:set`
+           - For Vercel: Add in Environment Variables section
+           
+        Variables to set:
+        ```
+        SUPABASE_URL=your_supabase_url_here
+        SUPABASE_ANON_KEY=your_supabase_anon_key_here
+        ```
+        
+        3. **Restart your app** after setting these variables
+        """)
+    else:
+        st.markdown("""
+        1. **[Create a free Supabase account](https://supabase.com/)**.
+        2. **Create a new project** inside Supabase.
+        3. **Create a table** in your project by running the following SQL command in the **SQL Editor**:
+        
+        ```sql
+        CREATE TABLE IF NOT EXISTS scraped_data (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        unique_name TEXT NOT NULL,
+        url TEXT,
+        raw_data JSONB,        
+        formatted_data JSONB, 
+        pagination_data JSONB,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        ```
 
-    4. **Go to Project Settings → API** and copy:
-        - **Supabase URL**
-        - **Anon Key**
-    
-    5. **Update your `.env` file** with these values:
-    
-    ```
-    SUPABASE_URL=your_supabase_url_here
-    SUPABASE_ANON_KEY=your_supabase_anon_key_here
-    ```
+        4. **Go to Project Settings → API** and copy:
+            - **Supabase URL**
+            - **Anon Key**
+        
+        5. **Update your `.env` file** with these values:
+        
+        ```
+        SUPABASE_URL=your_supabase_url_here
+        SUPABASE_ANON_KEY=your_supabase_anon_key_here
+        ```
 
-    6. **Restart the project** close everything and reopen it, and you're good to go! 🚀
-    """)
+        6. **Restart the project** close everything and reopen it, and you're good to go! 🚀
+        """)
 
 st.title("Universal Web Scraper 🦑")
 

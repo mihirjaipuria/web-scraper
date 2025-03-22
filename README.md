@@ -35,7 +35,7 @@ pip install -r requirements.txt
             - **Supabase URL**
             - **Anon Key**
         
-        5. **Update your `.env` file** with these values:
+        5. **Create a `.env` file** with these values (use `.env.example` as a template):
         
         ```
         SUPABASE_URL=your_supabase_url_here
@@ -71,3 +71,40 @@ To use pagination:
 3. The app will detect pagination URLs and automatically scrape all pages
 
 Results from paginated pages are clearly marked in the data display.
+
+## Hosting Information
+
+### Environment Variables for Hosting
+When deploying this application, you need to configure environment variables on your hosting platform:
+
+1. **Required Environment Variables:**
+   - `SUPABASE_URL` - Your Supabase project URL
+   - `SUPABASE_ANON_KEY` - Your Supabase anonymous key
+   - `OPENAI_API_KEY` - Your OpenAI API key (if using OpenAI models)
+
+2. **How to Set Environment Variables on Different Platforms:**
+
+   **Streamlit Cloud:**
+   - Go to your app settings
+   - Navigate to "Secrets"
+   - Add each variable in the format:
+     ```
+     SUPABASE_URL = "your_url_here"
+     SUPABASE_ANON_KEY = "your_key_here"
+     ```
+
+   **Heroku:**
+   - Use the Heroku Dashboard or CLI:
+     ```
+     heroku config:set SUPABASE_URL=your_url_here
+     heroku config:set SUPABASE_ANON_KEY=your_key_here
+     ```
+
+   **Vercel:**
+   - In your project settings, find "Environment Variables"
+   - Add each key-value pair
+
+3. **Troubleshooting**:
+   - If you see the Supabase setup screen, it means your environment variables aren't being loaded correctly
+   - Check that the variable names exactly match those used in the code 
+   - Verify you've set the variables on your hosting platform
