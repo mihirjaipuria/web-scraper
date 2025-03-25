@@ -12,7 +12,7 @@ import os
 # ---local imports---
 from scraper import scrape_urls
 from pagination import paginate_urls
-from markdown import fetch_and_store_markdowns, install_playwright_browser
+from markdown import fetch_and_store_markdowns
 from assets import MODELS_USED, OPENAI_MODEL_FULLNAME
 from api_management import get_supabase_client
 
@@ -35,12 +35,91 @@ def check_playwright_installed():
         if result.returncode != 0 or "Looks like Playwright was just installed" in result.stderr:
             with st.spinner("Setting up Playwright browsers (required for web scraping)..."):
                 st.info("Installing Playwright browsers. This may take a minute...")
-                install_playwright_browser()
+                install_playwright()
     except Exception as e:
         st.warning(f"Could not verify Playwright installation: {e}")
         # Try to install anyway
         with st.spinner("Attempting to install Playwright browsers..."):
-            install_playwright_browser()
+            install_playwright()
+
+def install_playwright():
+    """
+    Install Playwright browsers using subprocess
+    """
+    try:
+        # First check if we can access the playwright command
+        subprocess.run(
+            ["playwright", "--version"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        
+        # If that succeeded, run the install command
+        process = subprocess.run(
+            ["playwright", "install", "chromium"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        st.success("✅ Playwright browsers installed successfully!")
+        return True
+    except subprocess.CalledProcessError as e:
+        st.error(f"Failed to run Playwright command: {e.stderr}")
+        
+        # If we're on Linux, try to install system dependencies
+        if sys.platform.startswith('linux'):
+            try:
+                st.info("Installing system dependencies for Playwright on Linux...")
+                subprocess.run(
+                    ["playwright", "install-deps", "chromium"],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                
+                # Try installing browsers again
+                subprocess.run(
+                    ["playwright", "install", "chromium"],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                st.success("✅ Playwright browsers installed successfully after adding dependencies!")
+                return True
+            except Exception as e2:
+                st.error(f"Failed to install Playwright dependencies: {e2}")
+                return False
+        return False
+    except FileNotFoundError:
+        st.error("Playwright command not found. Make sure playwright is installed via 'pip install playwright'.")
+        
+        # Try to install playwright if it's not found
+        try:
+            st.info("Attempting to install playwright via pip...")
+            subprocess.run(
+                ["pip", "install", "playwright"],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            st.success("Playwright installed! Now installing browsers...")
+            
+            # Try installing browsers after installing playwright
+            subprocess.run(
+                ["playwright", "install", "chromium"],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            st.success("✅ Playwright browsers installed successfully!")
+            return True
+        except Exception as e:
+            st.error(f"Failed to install playwright: {e}")
+            return False
+    except Exception as e:
+        st.error(f"Unexpected error during Playwright installation: {e}")
+        return False
 
 # Initialize Streamlit app
 st.set_page_config(page_title="ProfScrape AI", page_icon="🦑")
