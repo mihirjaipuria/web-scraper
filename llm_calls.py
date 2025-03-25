@@ -4,7 +4,6 @@ import json
 from litellm import (completion,token_counter,completion_cost,get_max_tokens,)
 from assets import USER_MESSAGE, OPENAI_MODEL_FULLNAME
 from api_management import get_api_key
-import os
 
 
 
@@ -35,12 +34,8 @@ def call_llm_model(data,response_format,model,system_message,extra_user_instruct
             - cost: The overall cost (in USD) for the API call.
     """
     # Get the API key
-    env_value = get_api_key(model)
-    print("env variable is:" + env_value)
-    # Set it in os.environ so that litellm / underlying client sees it
-    if env_value:
-        os.environ["OPENAI_API_KEY"] = env_value
-
+    api_key = get_api_key(model)
+    
     model_max_tokens = get_max_tokens(model)
     if max_tokens is not None:
         max_tokens = min(max_tokens, model_max_tokens)-100 
@@ -58,6 +53,7 @@ def call_llm_model(data,response_format,model,system_message,extra_user_instruct
         "model": model,
         "messages": messages,
         "response_format": response_format,
+        "api_key": api_key  # Pass the API key directly in the completion call
     }
     if max_tokens is not None:
         params["max_tokens"] = max_tokens
