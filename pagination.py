@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from typing import List
 from pydantic import create_model
 from llm_calls import (call_llm_model)
-from scraper import scrape_urls
+from scraper import scrape_urls, extract_and_add_emails
 
 supabase = get_supabase_client()
 
@@ -63,7 +63,38 @@ def save_pagination_data(unique_name: str, pagination_data):
     RESET = "\033[0m" 
     print(f"{MAGENTA}INFO:Pagination data saved for {unique_name}{RESET}")
 
-def paginate_urls(unique_names: List[str], selected_model: str, indication: str, urls:List[str], fields: List[str]=None, auto_scrape_pages: bool=True):
+def is_likely_first_page(url: str) -> bool:
+    """
+    Determine if a URL is likely the first page of content.
+    This function uses heuristics to detect page 1 even without explicit page numbers.
+    
+    Args:
+        url: URL to check
+    
+    Returns:
+        True if the URL is likely page 1, False otherwise
+    """
+    # Check for explicit page 1 markers
+    page_number = extract_page_number(url)
+    if page_number == 1:
+        return True
+    
+    # Check for common patterns that indicate a base/first page
+    # 1. Base domain with no pagination parameters
+    if re.match(r'^https?://[^/]+/?$', url):
+        return True
+    
+    # 2. URLs ending with / or common index files
+    if re.search(r'/$|/index\.(?:html|php|asp|jsp)$', url):
+        return True
+    
+    # 3. No pagination parameters at all
+    if not any(param in url for param in ['page=', '/page/', '?p=', '&p=']):
+        return True
+    
+    return False
+
+def paginate_urls(unique_names: List[str], selected_model: str, indication: str, urls:List[str], fields: List[str]=None, auto_scrape_pages: bool=True, start_page: int=1, end_page: int=None):
     """
     For each unique_name, read raw_data, detect pagination, save results,
     accumulate cost usage, and return a final summary.
@@ -75,6 +106,8 @@ def paginate_urls(unique_names: List[str], selected_model: str, indication: str,
         urls: List of URLs corresponding to the unique names
         fields: Fields to extract when scraping paginated URLs
         auto_scrape_pages: Whether to automatically scrape the paginated pages
+        start_page: Starting page number to scrape (default: 1)
+        end_page: Ending page number to scrape (default: None, scrape all pages)
         
     Returns:
         Total input tokens, output tokens, cost, and pagination results
@@ -85,6 +118,17 @@ def paginate_urls(unique_names: List[str], selected_model: str, indication: str,
     pagination_results = []
     all_paginated_data = []
 
+    # Track original URLs to avoid duplicates
+    original_urls = set(urls)
+    
+    # Check if any of the original URLs are page 1
+    original_has_page_1 = False
+    for url in urls:
+        if is_likely_first_page(url):
+            original_has_page_1 = True
+            print(f"\033[34mMain URL is detected as page 1: {url}\033[0m")
+            break
+
     # First extract pagination URLs from all pages
     for uniq, current_url in zip(unique_names, urls):
         raw_data = read_raw_data(uniq)
@@ -92,9 +136,24 @@ def paginate_urls(unique_names: List[str], selected_model: str, indication: str,
             print(f"No raw_data found for {uniq}, skipping pagination.")
             continue
         
+        # Adjust pagination range if original URL is page 1
+        effective_start_page = start_page
+        if original_has_page_1 and start_page == 1:
+            # Skip page 1 in pagination since it's already in the original URLs
+            effective_start_page = 2
+            print(f"\033[34mAdjusting pagination to start from page 2 since page 1 is in main URLs\033[0m")
+        
+        # Add pagination range information to the prompt
+        pagination_range_info = f"Extract pagination URLs only within this range: starting from page {effective_start_page}"
+        if end_page is not None:
+            pagination_range_info += f" up to page {end_page}"
+        pagination_range_info += "."
+        
+        full_indication = indication + "\n" + pagination_range_info if indication.strip() else pagination_range_info
+        
         response_schema = get_pagination_response_format()
-        full_indication = build_pagination_prompt(indication, current_url)
-        pag_data, token_counts, cost = call_llm_model(raw_data, response_schema, selected_model, full_indication)
+        prompt = build_pagination_prompt(full_indication, current_url)
+        pag_data, token_counts, cost = call_llm_model(raw_data, response_schema, selected_model, prompt)
 
         # Store pagination data
         save_pagination_data(uniq, pag_data)
@@ -130,9 +189,24 @@ def paginate_urls(unique_names: List[str], selected_model: str, indication: str,
             if isinstance(pagination_data, dict) and "page_urls" in pagination_data:
                 page_urls = pagination_data.get("page_urls", [])
                 if isinstance(page_urls, list):
+                    # Determine effective start page (skip page 1 if it's in the original URLs)
+                    effective_start = start_page
+                    if original_has_page_1 and start_page == 1:
+                        # If the main URL is already page 1, start from page 2
+                        effective_start = 2
+                        # Filter out all page 1 URLs to avoid duplication
+                        page_urls = [url for url in page_urls if not (extract_page_number(url) == 1 or 
+                                                                    (extract_page_number(url) is None and is_likely_first_page(url)))]
+                    
+                    # Filter URLs based on the effective page number range
+                    filtered_urls = filter_urls_by_page_range(page_urls, effective_start, end_page)
+                    
+                    # Filter out original URLs to avoid duplicates
+                    filtered_urls = [url for url in filtered_urls if url not in original_urls]
+                    
                     # Log the detected URLs
-                    print(f"\033[34mDetected {len(page_urls)} pagination URLs for {page_info.get('unique_name')}\033[0m")
-                    all_page_urls.extend(page_urls)
+                    print(f"\033[34mDetected {len(filtered_urls)} unique pagination URLs within range for {page_info.get('unique_name')}\033[0m")
+                    all_page_urls.extend(filtered_urls)
         
         if all_page_urls:
             # Remove duplicates while preserving order
@@ -142,7 +216,7 @@ def paginate_urls(unique_names: List[str], selected_model: str, indication: str,
                 if url not in seen_urls:
                     seen_urls.add(url)
                     unique_page_urls.append(url)
-            
+                    
             print(f"\033[34mBeginning to scrape {len(unique_page_urls)} unique pagination URLs\033[0m")
             
             # Fetch and store content for all pagination URLs
@@ -160,6 +234,14 @@ def paginate_urls(unique_names: List[str], selected_model: str, indication: str,
                     selected_model
                 )
                 
+                # Apply email extraction to pagination results if not already done in scrape_urls
+                for data_item in page_data:
+                    unique_name = data_item.get("unique_name")
+                    parsed_data = data_item.get("parsed_data")
+                    if unique_name and parsed_data:
+                        # Email extraction is now handled within scrape_urls
+                        pass
+                
                 # Add to total tokens and cost
                 total_input_tokens += page_in_tokens
                 total_output_tokens += page_out_tokens
@@ -172,7 +254,26 @@ def paginate_urls(unique_names: List[str], selected_model: str, indication: str,
                 
                 # Add pagination source information to the results
                 for data_item in all_paginated_data:
-                    data_item["pagination_source"] = True
+                    if isinstance(data_item, dict):
+                        data_item["pagination_source"] = True
+                    else:
+                        # If data_item is not a dict, try to convert it
+                        try:
+                            if isinstance(data_item, str):
+                                data_dict = json.loads(data_item)
+                                data_dict["pagination_source"] = True
+                                # Replace the string with the dict
+                                i = all_paginated_data.index(data_item)
+                                all_paginated_data[i] = data_dict
+                            elif hasattr(data_item, 'dict'):
+                                # If it's a pydantic model
+                                data_dict = data_item.dict()
+                                data_dict["pagination_source"] = True
+                                # Replace the model with the dict
+                                i = all_paginated_data.index(data_item)
+                                all_paginated_data[i] = data_dict
+                        except (json.JSONDecodeError, ValueError, AttributeError) as e:
+                            print(f"\033[31mError processing pagination data item: {str(e)}\033[0m")
             else:
                 print("\033[33mNo content was retrieved from pagination URLs\033[0m")
         else:
@@ -371,3 +472,107 @@ def search_faculty_by_prompt(faculty_profiles: List[Dict], prompt: str) -> List[
             filtered_profiles.append(profile_copy)
     
     return filtered_profiles
+
+def filter_urls_by_page_range(urls: List[str], start_page: int, end_page: int = None) -> List[str]:
+    """
+    Filter URLs based on page numbers in the range [start_page, end_page].
+    If end_page is None, include all pages from start_page onwards.
+    
+    Args:
+        urls: List of URLs to filter
+        start_page: Starting page number (inclusive)
+        end_page: Ending page number (inclusive), or None for all pages
+    
+    Returns:
+        List of URLs that match the specified page range
+    """
+    filtered_urls = []
+    seen_page_numbers = set()  # Track page numbers we've already seen
+    
+    print(f"\033[35mFiltering {len(urls)} URLs for pages {start_page}-{end_page if end_page else 'end'}\033[0m")
+    
+    for url in urls:
+        # Try to extract page number from URL
+        page_number = extract_page_number(url)
+        
+        if page_number is not None:
+            # Skip if we've already seen this page number
+            if page_number in seen_page_numbers:
+                print(f"\033[35mSkipping duplicate page {page_number}: {url}\033[0m")
+                continue
+                
+            if end_page is not None:
+                if start_page <= page_number <= end_page:
+                    print(f"\033[35mIncluding page {page_number} (in range {start_page}-{end_page}): {url}\033[0m")
+                    filtered_urls.append(url)
+                    seen_page_numbers.add(page_number)
+                else:
+                    print(f"\033[35mSkipping page {page_number} (outside range {start_page}-{end_page}): {url}\033[0m")
+            else:
+                if page_number >= start_page:
+                    print(f"\033[35mIncluding page {page_number} (>= {start_page}): {url}\033[0m")
+                    filtered_urls.append(url)
+                    seen_page_numbers.add(page_number)
+                else:
+                    print(f"\033[35mSkipping page {page_number} (< {start_page}): {url}\033[0m")
+        else:
+            # If page number can't be determined, include the URL
+            # This ensures we don't miss important URLs
+            print(f"\033[35mIncluding URL with no page number detected: {url}\033[0m")
+            filtered_urls.append(url)
+    
+    print(f"\033[35mFiltered to {len(filtered_urls)} URLs in range\033[0m")
+    return filtered_urls
+
+def extract_page_number(url: str) -> Optional[int]:
+    """
+    Extract page number from a URL.
+    
+    Args:
+        url: URL to extract page number from
+    
+    Returns:
+        Page number as integer, or None if not found
+    """
+    # Common patterns for page numbers in URLs
+    patterns = [
+        r'[?&]page=(\d+)',           # ?page=X or &page=X
+        r'[?&]p=(\d+)',              # ?p=X or &p=X
+        r'[?&]pg=(\d+)',             # ?pg=X or &pg=X
+        r'[?&]paged=(\d+)',          # ?paged=X or &paged=X
+        r'[?&]paging=(\d+)',         # ?paging=X or &paging=X
+        r'[?&]pp=(\d+)',             # ?pp=X or &pp=X
+        r'[?&]pagina=(\d+)',         # ?pagina=X or &pagina=X (Spanish/Italian)
+        r'[?&]seite=(\d+)',          # ?seite=X or &seite=X (German)
+        r'[?&]pagine=(\d+)',         # ?pagine=X or &pagine=X
+        r'[?&]pagination=(\d+)',     # ?pagination=X
+        r'[?&]current=(\d+)',        # ?current=X or &current=X
+        r'[?&]offset=(\d+)',         # ?offset=X or &offset=X
+        r'/page/(\d+)',              # /page/X
+        r'/p/(\d+)',                 # /p/X
+        r'/paged/(\d+)',             # /paged/X
+        r'/pages/(\d+)',             # /pages/X
+        r'-page-(\d+)',              # -page-X
+        r'_page_(\d+)',              # _page_X
+        r'-p-(\d+)',                 # -p-X
+        r'_p_(\d+)',                 # _p_X
+        r'[\-_](\d+)\.html',         # -X.html or _X.html
+        r'/(\d+)/?$',                # /X/ at end of URL
+        r'page(\d+)\.html',          # pageX.html
+        r'p(\d+)\.html',             # pX.html
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            try:
+                page_num = int(match.group(1))
+                # Print diagnostic info for debugging
+                # print(f"\033[35mExtracted page number {page_num} from URL: {url} using pattern: {pattern}\033[0m")
+                return page_num
+            except ValueError:
+                pass
+    
+    # If no page number found, default to None
+    # print(f"\033[35mNo page number found in URL: {url}\033[0m")
+    return None

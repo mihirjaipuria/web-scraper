@@ -7,7 +7,6 @@ import json
 import re
 import sys
 import asyncio
-import os
 # ---local imports---
 from scraper import scrape_urls
 from pagination import paginate_urls
@@ -28,66 +27,41 @@ if supabase==None:
     st.error("🚨 **Supabase is not configured!** This project requires a Supabase database to function.")
     st.warning("Follow these steps to set it up:")
 
-    # Check if we're in a hosted environment or local environment
-    is_hosted = os.environ.get("HOSTED_ENVIRONMENT") or "STREAMLIT_SHARING" in os.environ or "DYNO" in os.environ or "VERCEL" in os.environ
+    st.markdown("""
+    1. **[Create a free Supabase account](https://supabase.com/)**.
+    2. **Create a new project** inside Supabase.
+    3. **Create a table** in your project by running the following SQL command in the **SQL Editor**:
     
-    if is_hosted:
-        st.warning("⚠️ It appears you're running in a hosted environment but the Supabase credentials are missing. You need to set environment variables.")
-        st.markdown("""
-        ### Hosting Environment Setup:
-        
-        For hosted environments (Streamlit Cloud, Heroku, Vercel, etc.), you need to set environment variables:
-        
-        1. **Find Your Supabase Credentials**:
-           - From Supabase dashboard → Project Settings → API
-           - Copy your **URL** and **anon key**
-           
-        2. **Set Environment Variables on Your Hosting Platform**:
-           - For Streamlit Cloud: Add to Secrets section
-           - For Heroku: Use `heroku config:set`
-           - For Vercel: Add in Environment Variables section
-           
-        Variables to set:
-        ```
-        SUPABASE_URL=your_supabase_url_here
-        SUPABASE_ANON_KEY=your_supabase_anon_key_here
-        ```
-        
-        3. **Restart your app** after setting these variables
-        """)
-    else:
-        st.markdown("""
-        1. **[Create a free Supabase account](https://supabase.com/)**.
-        2. **Create a new project** inside Supabase.
-        3. **Create a table** in your project by running the following SQL command in the **SQL Editor**:
-        
-        ```sql
-        CREATE TABLE IF NOT EXISTS scraped_data (
-        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-        unique_name TEXT NOT NULL,
-        url TEXT,
-        raw_data JSONB,        
-        formatted_data JSONB, 
-        pagination_data JSONB,
-        created_at TIMESTAMPTZ DEFAULT NOW()
-        );
-        ```
+    ```sql
+    CREATE TABLE IF NOT EXISTS scraped_data (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    unique_name TEXT NOT NULL,
+    url TEXT,
+    raw_data JSONB,        
+    formatted_data JSONB, 
+    pagination_data JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    ```
 
-        4. **Go to Project Settings → API** and copy:
-            - **Supabase URL**
-            - **Anon Key**
-        
-        5. **Update your `.env` file** with these values:
-        
-        ```
-        SUPABASE_URL=your_supabase_url_here
-        SUPABASE_ANON_KEY=your_supabase_anon_key_here
-        ```
+    4. **Go to Project Settings → API** and copy:
+        - **Supabase URL**
+        - **Anon Key**
+    
+    5. **Update your `.env` file** with these values:
+    
+    ```
+    SUPABASE_URL=your_supabase_url_here
+    SUPABASE_ANON_KEY=your_supabase_anon_key_here
+    ```
 
-        6. **Restart the project** close everything and reopen it, and you're good to go! 🚀
-        """)
+    6. **Restart the project** close everything and reopen it, and you're good to go! 🚀
+    """)
 
 st.title("Universal Web Scraper 🦑")
+
+# Add a notice about email extraction capability
+st.info("✨ **NEW**: The scraper can now detect hidden or obfuscated email addresses from academic and professional pages!")
 
 # Initialize session state variables
 if 'scraping_state' not in st.session_state:
@@ -164,9 +138,21 @@ st.sidebar.markdown("---")
 
 use_pagination = st.sidebar.toggle("Enable Pagination")
 pagination_details = ""
+start_page = 1
+end_page = 1
+
 if use_pagination:
     pagination_details = st.sidebar.text_input("Enter Pagination Details (optional)",help="Describe how to navigate through pages (e.g., 'Next' button class, URL pattern)")
-
+    col1, col2 = st.sidebar.columns(2)
+    with col1:
+        start_page = st.number_input("Start Page", min_value=1, value=1, step=1, 
+                                     help="The first page number to scrape (inclusive)")
+    with col2:
+        end_page = st.number_input("End Page", min_value=1, value=1, step=1,
+                                  help="The last page number to scrape (inclusive)")
+    
+    st.sidebar.info("The scraper will detect pagination links and only process pages in the specified range.")
+        
 st.sidebar.markdown("---")
 
 
@@ -183,6 +169,8 @@ if st.sidebar.button("LAUNCH", type="primary"):
         st.session_state['fields'] = fields
         st.session_state['use_pagination'] = use_pagination
         st.session_state['pagination_details'] = pagination_details
+        st.session_state['start_page'] = start_page
+        st.session_state['end_page'] = end_page
         
         # fetch or reuse the markdown for each URL
         unique_names = fetch_and_store_markdowns(st.session_state["urls_splitted"])
@@ -221,7 +209,10 @@ if st.session_state['scraping_state'] == 'scraping':
                     OPENAI_MODEL_FULLNAME,
                     st.session_state['pagination_details'],
                     st.session_state["urls_splitted"],
-                    fields if show_tags else None
+                    fields if show_tags else None,
+                    auto_scrape_pages=True,
+                    start_page=st.session_state['start_page'],
+                    end_page=st.session_state['end_page']
                 )
                 total_input_tokens += in_tokens_p
                 total_output_tokens += out_tokens_p
@@ -311,23 +302,38 @@ if st.session_state['scraping_state'] == 'completed' and st.session_state['resul
             #    we might want to treat them as multiple rows. 
             #    Otherwise, we treat the entire data_item as a single row.
 
-            pd_obj = data_item["parsed_data"]
-
-            # If it has 'listings' in parsed_data
-            if isinstance(pd_obj, dict) and "listings" in pd_obj and isinstance(pd_obj["listings"], list):
-                # We'll create one row per listing, plus carry over "unique_name" or other fields
-                for listing in pd_obj["listings"]:
-                    # Make a shallow copy so we don't mutate 'listing'
-                    row_dict = dict(listing)
-                    # You can also attach the unique_name or other top-level fields:
-                    # row_dict["unique_name"] = data_item.get("unique_name", "")
+            try:
+                pd_obj = data_item["parsed_data"]
+                
+                # If pd_obj is a string, try to parse it as JSON
+                if isinstance(pd_obj, str):
+                    try:
+                        pd_obj = json.loads(pd_obj)
+                        # Update the parsed_data with the parsed JSON
+                        data_item["parsed_data"] = pd_obj
+                    except json.JSONDecodeError:
+                        # Can't parse as JSON, keep as string
+                        pass
+                
+                # If it has 'listings' in parsed_data
+                if isinstance(pd_obj, dict) and "listings" in pd_obj and isinstance(pd_obj["listings"], list):
+                    # We'll create one row per listing, plus carry over "unique_name" or other fields
+                    for listing in pd_obj["listings"]:
+                        # Make a shallow copy so we don't mutate 'listing'
+                        row_dict = dict(listing)
+                        # You can also attach the unique_name or other top-level fields:
+                        # row_dict["unique_name"] = data_item.get("unique_name", "")
+                        all_rows.append(row_dict)
+                else:
+                    # We'll just store the entire item as one row
+                    # Possibly flatten parsed_data => just store it as "parsed_data" field
+                    # e.g. if parsed_obj is a dict, embed it. Or keep it as string
+                    row_dict = dict(data_item)  # shallow copy
                     all_rows.append(row_dict)
-            else:
-                # We'll just store the entire item as one row
-                # Possibly flatten parsed_data => just store it as "parsed_data" field
-                # e.g. if parsed_obj is a dict, embed it. Or keep it as string
-                row_dict = dict(data_item)  # shallow copy
-                all_rows.append(row_dict)
+            except (TypeError, KeyError) as e:
+                # Handle the case where data_item is not a dict or doesn't have "parsed_data"
+                st.error(f"Error processing data item: {str(e)}")
+                continue
 
         # For each item in parsed_data, convert the pagination_source flag to a human-readable indicator
         for row in all_rows:
@@ -371,19 +377,42 @@ if st.session_state['scraping_state'] == 'completed' and st.session_state['resul
             # Convert all data to a single DataFrame
             all_listings = []
             for data in all_data:
-                if isinstance(data, str):
-                    try:
-                        data = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-                if isinstance(data, dict) and 'listings' in data:
-                    all_listings.extend(data['listings'])
-                elif hasattr(data, 'listings'):
-                    all_listings.extend([item.dict() for item in data.listings])
-                else:
-                    all_listings.append(data)
+                try:
+                    if isinstance(data, str):
+                        try:
+                            data = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
+                    
+                    if isinstance(data, dict):
+                        if 'listings' in data and isinstance(data['listings'], list):
+                            all_listings.extend(data['listings'])
+                        else:
+                            # If no listings found but it's a dict, add it as a row
+                            all_listings.append(data)
+                    elif hasattr(data, 'listings') and hasattr(data.listings, '__iter__'):
+                        try:
+                            all_listings.extend([item.dict() if hasattr(item, 'dict') else item for item in data.listings])
+                        except AttributeError:
+                            # If we can't get dict() but it's iterable, add as is
+                            all_listings.extend(list(data.listings))
+                    else:
+                        all_listings.append(data)
+                except (TypeError, AttributeError) as e:
+                    st.error(f"Error processing data for download: {str(e)}")
+                    continue
             
-            combined_df = pd.DataFrame(all_listings)
+            # Handle empty listings gracefully
+            if not all_listings:
+                st.warning("No data available for CSV download")
+                combined_df = pd.DataFrame()
+            else:
+                try:
+                    combined_df = pd.DataFrame(all_listings)
+                except (ValueError, TypeError) as e:
+                    st.error(f"Error creating DataFrame: {str(e)}")
+                    combined_df = pd.DataFrame()
+            
             st.download_button("Download CSV",data=combined_df.to_csv(index=False),file_name="scraped_data.csv")
 
         st.success(f"Scraping completed. Results saved in database")

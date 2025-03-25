@@ -5,6 +5,7 @@ from typing import List
 from api_management import get_supabase_client
 from utils import generate_unique_name
 from crawl4ai import AsyncWebCrawler
+import json
 
 supabase = get_supabase_client()
 
@@ -41,7 +42,14 @@ def read_raw_data(unique_name: str) -> str:
     response = supabase.table("scraped_data").select("raw_data").eq("unique_name", unique_name).execute()
     data = response.data
     if data and len(data) > 0:
-        return data[0]["raw_data"]
+        raw_data = data[0]["raw_data"]
+        # If raw_data is a string, try to parse it as JSON
+        if isinstance(raw_data, str):
+            try:
+                return json.loads(raw_data)
+            except json.JSONDecodeError:
+                return raw_data
+        return raw_data
     return ""
 
 def save_raw_data(unique_name: str, url: str, raw_data: str) -> None:
@@ -49,6 +57,14 @@ def save_raw_data(unique_name: str, url: str, raw_data: str) -> None:
     Save or update the row in supabase with unique_name, url, and raw_data.
     If a row with unique_name doesn't exist, it inserts; otherwise it might upsert.
     """
+    # If raw_data is a string, try to parse it as JSON
+    if isinstance(raw_data, str):
+        try:
+            raw_data = json.loads(raw_data)
+        except json.JSONDecodeError:
+            # If it's not valid JSON, keep it as a string
+            pass
+    
     supabase.table("scraped_data").upsert({
         "unique_name": unique_name,
         "url": url,

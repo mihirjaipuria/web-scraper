@@ -44,7 +44,9 @@ In cases where only part of a URL is provided, combine it with the given base UR
 Ensure that every URL you generate is clickable and leads directly to the intended page.
 
 -Incorporate User Indications:
-If additional user instructions about the pagination mechanism are provided at the end of the prompt, use those instructions to refine your URL generation.
+If additional user instructions about the pagination mechanism or page number ranges are provided at the end of the prompt, use those instructions to refine your URL generation.
+Pay special attention to instructions about starting and ending page numbers. Only generate URLs for pages within the specified range.
+
 Output Format Requirements:
 
 -Strictly output only a valid JSON object with the exact structure below:
