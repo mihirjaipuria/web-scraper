@@ -21,9 +21,9 @@ if sys.platform.startswith("win"):
 
 
 # Initialize Streamlit app
-st.set_page_config(page_title="Universal Web Scraper", page_icon="🦑")
+st.set_page_config(page_title="ProfScrape AI", page_icon="🦑")
 supabase=get_supabase_client()
-if supabase is None:
+if supabase==None:
     st.error("🚨 **Supabase is not configured!** This project requires a Supabase database to function.")
     st.warning("Follow these steps to set it up:")
 
@@ -54,12 +54,9 @@ if supabase is None:
     SUPABASE_URL=your_supabase_url_here
     SUPABASE_ANON_KEY=your_supabase_anon_key_here
     ```
-    
-    6. **For Streamlit Cloud Deployment**: Go to your app settings and add these variables to the secrets.
-    
-    7. **Restart the project** close everything and reopen it, and you're good to go! 🚀
+
+    6. **Restart the project** close everything and reopen it, and you're good to go! 🚀
     """)
-    st.stop()  # Stop execution if Supabase is not configured
 
 st.title("ProfScrape AI 🦑")
 
