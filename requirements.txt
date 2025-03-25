@@ -11,3 +11,4 @@ python-slugify==7.0.0
 anyio==4.6.0
 streamlit==1.39.0
 litellm==1.60.2
+streamlit_tags==1.2.8
