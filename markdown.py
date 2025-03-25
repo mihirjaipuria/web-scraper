@@ -6,6 +6,10 @@ from api_management import get_supabase_client
 from utils import generate_unique_name
 from crawl4ai import AsyncWebCrawler
 import json
+import subprocess
+import sys
+import streamlit as st
+import os
 
 supabase = get_supabase_client()
 
@@ -14,23 +18,131 @@ async def get_fit_markdown_async(url: str) -> str:
     Async function using crawl4ai's AsyncWebCrawler to produce the regular raw markdown.
     (Reverting from the 'fit' approach back to normal.)
     """
-
-    async with AsyncWebCrawler() as crawler:
-        result = await crawler.arun(url=url)
-        if result.success:
-            return result.markdown
+    try:
+        async with AsyncWebCrawler() as crawler:
+            result = await crawler.arun(url=url)
+            if result.success:
+                return result.markdown
+            else:
+                return ""
+    except Exception as e:
+        # Check if the error message contains the Playwright installation message
+        error_str = str(e)
+        if "Executable doesn't exist" in error_str and "playwright install" in error_str:
+            return "PLAYWRIGHT_INSTALL_NEEDED"
         else:
+            st.error(f"Error scraping URL: {e}")
             return ""
+
+
+def install_playwright_browser():
+    """
+    Install Playwright browsers using subprocess
+    """
+    try:
+        # First check if we can access the playwright command
+        subprocess.run(
+            ["playwright", "--version"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        
+        # If that succeeded, run the install command
+        st.info("Installing Playwright browsers. This may take a minute...")
+        process = subprocess.run(
+            ["playwright", "install", "chromium"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        st.success("✅ Playwright browsers installed successfully!")
+        return True
+    except subprocess.CalledProcessError as e:
+        st.error(f"Failed to run Playwright command: {e.stderr}")
+        
+        # If we're on Linux, try to install system dependencies
+        if sys.platform.startswith('linux'):
+            try:
+                st.info("Installing system dependencies for Playwright on Linux...")
+                subprocess.run(
+                    ["playwright", "install-deps", "chromium"],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                
+                # Try installing browsers again
+                subprocess.run(
+                    ["playwright", "install", "chromium"],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                st.success("✅ Playwright browsers installed successfully after adding dependencies!")
+                return True
+            except Exception as e2:
+                st.error(f"Failed to install Playwright dependencies: {e2}")
+                return False
+        return False
+    except FileNotFoundError:
+        st.error("Playwright command not found. Make sure playwright is installed via 'pip install playwright'.")
+        
+        # Try to install playwright if it's not found
+        try:
+            st.info("Attempting to install playwright via pip...")
+            subprocess.run(
+                ["pip", "install", "playwright"],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            st.success("Playwright installed! Now installing browsers...")
+            
+            # Try installing browsers after installing playwright
+            subprocess.run(
+                ["playwright", "install", "chromium"],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            st.success("✅ Playwright browsers installed successfully!")
+            return True
+        except Exception as e:
+            st.error(f"Failed to install playwright: {e}")
+            return False
+    except Exception as e:
+        st.error(f"Unexpected error during Playwright installation: {e}")
+        return False
 
 
 def fetch_fit_markdown(url: str) -> str:
     """
     Synchronous wrapper around get_fit_markdown_async().
+    Handles Playwright installation if needed.
     """
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    
     try:
-        return loop.run_until_complete(get_fit_markdown_async(url))
+        result = loop.run_until_complete(get_fit_markdown_async(url))
+        
+        # Check if we need to install Playwright browsers
+        if result == "PLAYWRIGHT_INSTALL_NEEDED":
+            # Install browsers
+            success = install_playwright_browser()
+            
+            if success:
+                # Try again after installation
+                result = loop.run_until_complete(get_fit_markdown_async(url))
+                if result == "PLAYWRIGHT_INSTALL_NEEDED":
+                    st.error("Failed to initialize Playwright browsers even after installation.")
+                    return ""
+                return result
+            else:
+                return ""
+                
+        return result
     finally:
         loop.close()
 
@@ -88,20 +200,42 @@ def fetch_and_store_markdowns(urls: List[str]) -> List[str]:
     Return a list of unique_names (one per URL).
     """
     unique_names = []
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    total_urls = len(urls)
+    for i, url in enumerate(urls):
+        try:
+            # Update progress
+            progress = (i / total_urls)
+            progress_bar.progress(progress)
+            status_text.text(f"Processing URL {i+1}/{total_urls}: {url[:40]}...")
+            
+            unique_name = generate_unique_name(url)
+            MAGENTA = "\033[35m"
+            RESET = "\033[0m"
+            # check if we already have raw_data in supabase
+            raw_data = read_raw_data(unique_name)
+            if raw_data:
+                print(f"{MAGENTA}Found existing data in supabase for {url} => {unique_name}{RESET}")
+            else:
+                # fetch fit markdown
+                status_text.text(f"Scraping content from URL {i+1}/{total_urls}: {url[:40]}...")
+                fit_md = fetch_fit_markdown(url)
+                if fit_md:
+                    save_raw_data(unique_name, url, fit_md)
+                else:
+                    st.warning(f"Could not scrape content from {url}. Skipping.")
+            unique_names.append(unique_name)
+        except Exception as e:
+            st.error(f"Error processing URL {url}: {str(e)}")
+            # Still add the unique name to keep the list consistent
+            unique_name = generate_unique_name(url)
+            unique_names.append(unique_name)
 
-    for url in urls:
-        unique_name = generate_unique_name(url)
-        MAGENTA = "\033[35m"
-        RESET = "\033[0m"
-        # check if we already have raw_data in supabase
-        raw_data = read_raw_data(unique_name)
-        if raw_data:
-            print(f"{MAGENTA}Found existing data in supabase for {url} => {unique_name}{RESET}")
-        else:
-            # fetch fit markdown
-            fit_md = fetch_fit_markdown(url)
-            print(fit_md)
-            save_raw_data(unique_name, url, fit_md)
-        unique_names.append(unique_name)
-
+    # Clear the progress indicators
+    progress_bar.empty()
+    status_text.empty()
+    
     return unique_names

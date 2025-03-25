@@ -7,10 +7,12 @@ import json
 import re
 import sys
 import asyncio
+import subprocess
+import os
 # ---local imports---
 from scraper import scrape_urls
 from pagination import paginate_urls
-from markdown import fetch_and_store_markdowns
+from markdown import fetch_and_store_markdowns, install_playwright_browser
 from assets import MODELS_USED, OPENAI_MODEL_FULLNAME
 from api_management import get_supabase_client
 
@@ -18,10 +20,34 @@ from api_management import get_supabase_client
 if sys.platform.startswith("win"):
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-
+def check_playwright_installed():
+    """Check if Playwright browsers are installed and install if missing"""
+    try:
+        # Try to run a simple Playwright command to check if browsers are installed
+        result = subprocess.run(
+            ["playwright", "install", "--help"],
+            capture_output=True,
+            text=True,
+            check=False  # Don't raise an exception if it fails
+        )
+        
+        # If the command fails or contains an error about browser installation
+        if result.returncode != 0 or "Looks like Playwright was just installed" in result.stderr:
+            with st.spinner("Setting up Playwright browsers (required for web scraping)..."):
+                st.info("Installing Playwright browsers. This may take a minute...")
+                install_playwright_browser()
+    except Exception as e:
+        st.warning(f"Could not verify Playwright installation: {e}")
+        # Try to install anyway
+        with st.spinner("Attempting to install Playwright browsers..."):
+            install_playwright_browser()
 
 # Initialize Streamlit app
 st.set_page_config(page_title="ProfScrape AI", page_icon="🦑")
+
+# Check Playwright installation
+check_playwright_installed()
+
 supabase=get_supabase_client()
 if supabase==None:
     st.error("🚨 **Supabase is not configured!** This project requires a Supabase database to function.")
