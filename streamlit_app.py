@@ -33,14 +33,39 @@ def check_playwright_installed():
         
         # If the command fails or contains an error about browser installation
         if result.returncode != 0 or "Looks like Playwright was just installed" in result.stderr:
-            with st.spinner("Setting up Playwright browsers (required for web scraping)..."):
-                st.info("Installing Playwright browsers. This may take a minute...")
-                install_playwright()
+            st.warning("⚠️ Playwright browsers are not installed. These are required for web scraping.")
+            
+            install_col1, install_col2 = st.columns(2)
+            with install_col1:
+                if st.button("Install Automatically", type="primary"):
+                    with st.spinner("Setting up Playwright browsers (required for web scraping)..."):
+                        st.info("Installing Playwright browsers. This may take a minute...")
+                        success = install_playwright()
+                        if success:
+                            st.success("Installation successful! Reloading app...")
+                            st.rerun()
+            
+            with install_col2:
+                st.error("""
+                If automatic installation fails, run this command in your terminal:
+                ```
+                playwright install
+                ```
+                """)
+            
+            # Return early - don't proceed until browsers are installed
+            return False
+            
+        return True
     except Exception as e:
         st.warning(f"Could not verify Playwright installation: {e}")
-        # Try to install anyway
-        with st.spinner("Attempting to install Playwright browsers..."):
-            install_playwright()
+        st.error("""
+        Please install Playwright browsers manually by running this command in your terminal:
+        ```
+        playwright install
+        ```
+        """)
+        return False
 
 def install_playwright():
     """
@@ -56,6 +81,25 @@ def install_playwright():
         )
         
         # If that succeeded, run the install command
+        st.info("Installing Playwright browsers. This may take a minute...")
+        
+        # Check if we're running in a Linux environment
+        if sys.platform.startswith('linux'):
+            # Try to install system dependencies first
+            try:
+                st.info("Installing system dependencies for Playwright on Linux...")
+                subprocess.run(
+                    ["playwright", "install-deps", "chromium"],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                st.success("System dependencies installed successfully!")
+            except Exception as e:
+                st.warning(f"Could not install system dependencies: {e}")
+                st.warning("You may need to run 'sudo playwright install-deps' manually if you encounter issues.")
+        
+        # Now install the browser
         process = subprocess.run(
             ["playwright", "install", "chromium"],
             capture_output=True,
@@ -67,38 +111,31 @@ def install_playwright():
     except subprocess.CalledProcessError as e:
         st.error(f"Failed to run Playwright command: {e.stderr}")
         
-        # If we're on Linux, try to install system dependencies
+        # Provide more specific guidance for Linux users
         if sys.platform.startswith('linux'):
-            try:
-                st.info("Installing system dependencies for Playwright on Linux...")
-                subprocess.run(
-                    ["playwright", "install-deps", "chromium"],
-                    capture_output=True,
-                    text=True,
-                    check=True
-                )
-                
-                # Try installing browsers again
-                subprocess.run(
-                    ["playwright", "install", "chromium"],
-                    capture_output=True,
-                    text=True,
-                    check=True
-                )
-                st.success("✅ Playwright browsers installed successfully after adding dependencies!")
-                return True
-            except Exception as e2:
-                st.error(f"Failed to install Playwright dependencies: {e2}")
-                return False
+            st.error("""
+            Installation failed. Please try running these commands manually in your terminal:
+            
+            ```
+            playwright install-deps
+            playwright install
+            ```
+            
+            If that doesn't work, you might need administrator privileges:
+            
+            ```
+            sudo playwright install-deps
+            playwright install
+            ```
+            """)
         return False
     except FileNotFoundError:
-        st.error("Playwright command not found. Make sure playwright is installed via 'pip install playwright'.")
+        st.error("Playwright command not found. Installing playwright via pip...")
         
         # Try to install playwright if it's not found
         try:
-            st.info("Attempting to install playwright via pip...")
             subprocess.run(
-                ["pip", "install", "playwright"],
+                [sys.executable, "-m", "pip", "install", "playwright"],
                 capture_output=True,
                 text=True,
                 check=True
@@ -115,17 +152,37 @@ def install_playwright():
             st.success("✅ Playwright browsers installed successfully!")
             return True
         except Exception as e:
-            st.error(f"Failed to install playwright: {e}")
+            st.error(f"Failed to install Playwright: {e}")
+            st.error("""
+            Please install Playwright and browsers manually:
+            
+            ```
+            pip install playwright
+            playwright install
+            ```
+            """)
             return False
     except Exception as e:
         st.error(f"Unexpected error during Playwright installation: {e}")
+        st.error("""
+        Please run these commands manually in your terminal:
+        
+        ```
+        pip install playwright
+        playwright install
+        ```
+        """)
         return False
 
 # Initialize Streamlit app
 st.set_page_config(page_title="ProfScrape AI", page_icon="🦑")
 
 # Check Playwright installation
-check_playwright_installed()
+playwright_ready = check_playwright_installed()
+
+# Only continue with the rest of the app if Playwright is ready or not needed yet
+if not playwright_ready:
+    st.stop()
 
 supabase=get_supabase_client()
 if supabase==None:

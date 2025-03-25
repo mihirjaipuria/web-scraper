@@ -49,13 +49,14 @@ def fetch_fit_markdown(url: str) -> str:
         # Check if we need to install Playwright browsers
         if result == "PLAYWRIGHT_INSTALL_NEEDED":
             st.error("""
-            Playwright browsers are not installed. Please run the following command in your terminal:
+            ⚠️ **Playwright browsers not found!**
+            
+            Please restart the application and use the "Install Automatically" button,
+            or run this command in your terminal:
             
             ```
             playwright install
             ```
-            
-            Then restart the application.
             """)
             return ""
                 
