@@ -39,6 +39,10 @@ def read_raw_data(unique_name: str) -> str:
     Query the 'scraped_data' table for the row with this unique_name,
     and return the 'raw_data' field.
     """
+    if supabase is None:
+        print("Warning: Supabase client is not initialized. Check your credentials.")
+        return None
+        
     response = supabase.table("scraped_data").select("raw_data").eq("unique_name", unique_name).execute()
     data = response.data
     if data and len(data) > 0:
@@ -50,7 +54,7 @@ def read_raw_data(unique_name: str) -> str:
             except json.JSONDecodeError:
                 return raw_data
         return raw_data
-    return ""
+    return None
 
 def save_raw_data(unique_name: str, url: str, raw_data: str) -> None:
     """

@@ -10,4 +10,5 @@ openai==1.66.5
 python-slugify==7.0.0
 anyio==4.6.0
 streamlit==1.39.0
+streamlit-tags==1.2.8
 litellm==1.60.2
